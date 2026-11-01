@@ -8,6 +8,7 @@ A Docker image that gives an AI agent a **real, headed Chromium** to drive, and 
 - The agent controls the browser with Microsoft's official [`@playwright/cli`](https://www.npmjs.com/package/@playwright/cli) (`playwright-cli`) through `docker exec`.
 - You watch the same screen at **http://localhost:6080** over noVNC.
 - An LLM skill ([`skills/agent-browser/SKILL.md`](skills/agent-browser/SKILL.md)) teaches the agent how to use it.
+- Works with Claude, OpenAI, Grok, DeepSeek, and local Ollama models. See [Connect it to your LLM](#connect-it-to-your-llm).
 
 There is no custom control server and no MCP server. Only the noVNC port is published.
 
@@ -96,6 +97,108 @@ ln -s "$PWD/skills/agent-browser" ~/.claude/skills/agent-browser
 ```
 
 The skill uses `docker compose` commands, so the agent should run them from this project directory.
+
+## Connect it to your LLM
+
+There is no server to register. The model drives the browser by running shell commands such as `docker compose exec agent-browser playwright-cli snapshot`. Every integration is the same two pieces:
+
+1. **A shell tool** the model can call, restricted to `playwright-cli` inside the container.
+2. **The instructions** in [`skills/agent-browser/SKILL.md`](skills/agent-browser/SKILL.md), loaded as a skill or as the system prompt.
+
+Start the stack first (`docker compose up -d`) and open the [live view](http://localhost:6080/vnc.html?autoconnect=true&resize=scale) to watch.
+
+> **Security: never give an LLM an unrestricted shell.** Pages the agent reads can contain prompt injection. Allowlist only `playwright-cli` in the `agent-browser` container, and require approval for anything else. [`examples/agent_loop.py`](examples/agent_loop.py) enforces this: it rejects any command that isn't `playwright-cli …` and runs the argv with `docker exec` directly, never through a shell.
+
+### Coding agents (skill-based)
+
+**Claude Code.** Skills are folders with a `SKILL.md` in `~/.claude/skills/<name>/` (all projects) or `.claude/skills/<name>/` (this repo). Symlinks are supported.
+
+```bash
+mkdir -p ~/.claude/skills
+ln -s "$PWD/skills/agent-browser" ~/.claude/skills/agent-browser
+```
+
+Claude loads the skill when a task needs a browser, or invoke it with `/agent-browser`. To skip the permission prompt for browser commands only, add an allow rule such as `Bash(docker compose exec agent-browser playwright-cli *)` in `/permissions`. Don't allow `Bash(*)`.
+
+**OpenAI Codex CLI.** Codex reads skills from `.agents/skills/` (repo) or `~/.agents/skills/` (user), and follows symlinks:
+
+```bash
+mkdir -p ~/.agents/skills
+ln -s "$PWD/skills/agent-browser" ~/.agents/skills/agent-browser
+```
+
+Mention it with `$` or `/skills`, or let Codex pick it from the description. Keep Codex's sandbox/approval settings on so it asks before running commands outside the allowlist.
+
+**Other agents (Cursor, Aider, …).** Any agent that can run shell commands and read instructions works. Point it at the skill file, for example from your project's `AGENTS.md` ("For browser tasks, follow `skills/agent-browser/SKILL.md`"), or `aider --read skills/agent-browser/SKILL.md`. Restrict its terminal to `playwright-cli` commands where the agent supports it.
+
+### API models (generic agent loop)
+
+[`examples/agent_loop.py`](examples/agent_loop.py) is a ~150-line agent loop for any **OpenAI-compatible** Chat Completions API. It uses the skill as the system prompt and exposes one tool, `run_shell`, that only runs `playwright-cli` in the container.
+
+```bash
+pip install openai
+docker compose up -d
+export BASE_URL=... API_KEY=... MODEL=...     # see the provider table below
+python examples/agent_loop.py "Open example.com and tell me the main heading"
+```
+
+The tool definition the model sees:
+
+```python
+{"type": "function", "function": {
+    "name": "run_shell",
+    "description": "Run ONE playwright-cli command inside the agent-browser container ...",
+    "parameters": {"type": "object",
+                   "properties": {"command": {"type": "string"}},
+                   "required": ["command"]}}}
+```
+
+Optional env vars: `CONTAINER` (default `agent-browser`), `SKILL_FILE`, `MAX_STEPS` (default 30).
+
+| Provider | `BASE_URL` | `API_KEY` | `MODEL` (examples) |
+|----------|-----------|-----------|--------------------|
+| OpenAI | `https://api.openai.com/v1` | OpenAI key | `gpt-6.1-sol`, `gpt-6-astra` |
+| Claude (Anthropic) | `https://api.anthropic.com/v1/` | Claude API key | `claude-opus-5-5`, `claude-sonnet-4-6` |
+| Grok (xAI) | `https://api.x.ai/v1` | xAI key | `grok-4.7` |
+| DeepSeek | `https://api.deepseek.com` | DeepSeek key | `deepseek-flash`, `deepseek-v4-pro` |
+| Ollama (local) | `http://localhost:11434/v1` | any string, e.g. `ollama` | `qwen3`, `gpt-oss:20b` |
+
+Model names change often; check each provider's model list.
+
+**OpenAI**
+
+```bash
+export BASE_URL=https://api.openai.com/v1 API_KEY=$OPENAI_API_KEY MODEL=gpt-6.1-sol
+```
+
+**Claude API / Claude Desktop.** The loop works through Anthropic's [OpenAI SDK compatibility](https://platform.claude.com/docs/en/api/openai-sdk) layer (Anthropic recommends the native API for production; port the same single tool to the Messages API if you need its full features):
+
+```bash
+export BASE_URL=https://api.anthropic.com/v1/ API_KEY=$ANTHROPIC_API_KEY MODEL=claude-opus-5-5
+```
+
+Claude Desktop has no built-in shell, so use Claude Code (above) for this stack.
+
+**Grok (xAI)**
+
+```bash
+export BASE_URL=https://api.x.ai/v1 API_KEY=$XAI_API_KEY MODEL=grok-4.7
+```
+
+**DeepSeek**
+
+```bash
+export BASE_URL=https://api.deepseek.com API_KEY=$DEEPSEEK_API_KEY MODEL=deepseek-flash
+```
+
+**Ollama (local, no API key)**
+
+```bash
+ollama pull qwen3
+export BASE_URL=http://localhost:11434/v1 API_KEY=ollama MODEL=qwen3
+```
+
+Use a model that supports tool calling (see [Ollama tool calling](https://docs.ollama.com/capabilities/tool-calling)); small models may loop or misuse refs, so keep `MAX_STEPS` low. Ollama doesn't need to reach the container: the script runs on the host, talks to Ollama on `localhost:11434`, and drives the browser with `docker exec`. If you run the agent loop inside another container, use `http://host.docker.internal:11434/v1` (add `extra_hosts: ["host.docker.internal:host-gateway"]` on Linux) and mount the Docker socket only if you accept that risk.
 
 ## How it works
 
