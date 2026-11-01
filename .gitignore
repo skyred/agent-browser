@@ -1,0 +1,13 @@
+node_modules/
+dist/
+artifacts/*
+!artifacts/.gitkeep
+.env
+.env.*
+*.log
+.DS_Store
+coverage/
+*.tsbuildinfo
+.playwright-cli/
+playwright-cli-*.tgz
+skill-install/

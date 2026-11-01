@@ -1,0 +1,25 @@
+{
+  "browser": {
+    "browserName": "chromium",
+    "launchOptions": {
+      "headless": false,
+      "args": [
+        "--no-sandbox",
+        "--disable-dev-shm-usage",
+        "--disable-gpu"
+      ]
+    },
+    "contextOptions": {
+      "viewport": {
+        "width": 1280,
+        "height": 800
+      }
+    }
+  },
+  "outputDir": "/artifacts",
+  "outputMode": "stdout",
+  "timeouts": {
+    "action": 10000,
+    "navigation": 60000
+  }
+}

@@ -1,0 +1,5 @@
+#!/usr/bin/env bash
+# Thin wrapper: ensure DISPLAY and run official playwright-cli.
+set -euo pipefail
+export DISPLAY="${DISPLAY:-:99}"
+exec playwright-cli "$@"

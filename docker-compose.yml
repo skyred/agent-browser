@@ -1,0 +1,25 @@
+services:
+  agent-browser:
+    build: .
+    image: agent-browser:local
+    container_name: agent-browser
+    ports:
+      - "6080:6080"   # noVNC web UI (live view only)
+    volumes:
+      - ./artifacts:/artifacts
+      # Persist playwright-cli daemon/session state across restarts
+      - agent-browser-sessions:/home/pwuser/.cache/ms-playwright
+    environment:
+      DISPLAY: ":99"
+      NOVNC_PORT: "6080"
+      ARTIFACTS_DIR: /artifacts
+      PLAYWRIGHT_MCP_CONFIG: /app/.playwright/cli.config.json
+      PLAYWRIGHT_MCP_OUTPUT_DIR: /artifacts
+      PLAYWRIGHT_MCP_HEADLESS: "false"
+      # Optional: set to require a password for the VNC/noVNC session
+      # NOVNC_PASSWORD: ""
+    shm_size: "1gb"
+    restart: unless-stopped
+
+volumes:
+  agent-browser-sessions:
