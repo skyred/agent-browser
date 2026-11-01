@@ -61,7 +61,7 @@ USER pwuser
 EXPOSE 6080
 
 HEALTHCHECK --interval=15s --timeout=5s --start-period=25s --retries=3 \
-  CMD-SHELL xdpyinfo -display :99 >/dev/null 2>&1 || exit 1
+  CMD xdpyinfo -display :99 >/dev/null 2>&1 || exit 1
 
 VOLUME ["/artifacts"]
 
